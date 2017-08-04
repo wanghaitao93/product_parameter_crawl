@@ -13,6 +13,9 @@ import re
 import json
 from lxml import html
 import lxml.etree 
+import guppy
+import gc
+hp = guppy.hpy()
 
 reload(sys)
 sys.setdefaultencoding('utf-8')
@@ -64,6 +67,7 @@ def parse(response):
     if my_conf['data_type'] == 'html':
 
 	# detail parameter list
+        item = {}
 	parameter_list = []
         
         # string convert to html type 
@@ -126,6 +130,7 @@ def parse(response):
                     }
                 )
             )
+            #update_url_list.append(UpdateOne({"wap_product_url":item['url']}, {"$set":{"parameter_list":item['parameter_list'], "product_introduction":item['product_introduction']}}))
             update_lock.release()
 
         # write statistics file & flush file
@@ -172,17 +177,16 @@ def update_mongo():
                     result = meta.bulk_write(update_url_temp_list)
                 except Exception as e:
                     print e
-                    print>>sys.stderr, "error", url
             print >> fw_update_mongo, 'time', time.time() - pre_time, cnt_update 
             fw_update_mongo.flush()
         else:
             time.sleep(10)
+            gc.collect()
     if len(update_url_list) > 0:
         try:
             result = meta.bulk_write(update_url_list)
         except Exception as e:
             print e
-            print>>sys.stderr, "error", url
         print >> fw_update_mongo, 'time', time.time() - pre_time, len(update_url_list) 
        
     
