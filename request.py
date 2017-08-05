@@ -40,6 +40,7 @@ update_url_list = []
 
 fw_put_url = open('fw_put_url', 'a+')
 fw_down_url = open('fw_down_url', 'a+')
+fw_301 = open('fw_301', 'a+')
     
 def request_url(line):
     """
@@ -54,6 +55,7 @@ def request_url(line):
         r = requests.get(line, headers={'Connection':'close'})
         
         if r.status_code == 200:
+            print r.url
             parse(r)
     except Exception as e:
         print e
@@ -63,80 +65,136 @@ def parse(response):
     parse web(html || json),   
     """
     
+    status = response.status_code
+
+    num_overseas = 0
+    parameter_xpath_list = my_conf['parameter_xpath']
+
+    if response.history != []:
+        try:
+            response = requests.get(response.url, headers={'Connection':'close'})
+            if response.status_code == 200:
+                num_overseas = 1 
+                parameter_xpath_list = my_conf['global_parameter_xpath']
+            else:
+                print 'error'
+        except Exception as e:
+            print e
+            return
+    
     # web type is html
     if my_conf['data_type'] == 'html':
 
 	# detail parameter list
         item = {}
-	parameter_list = []
         
         # string convert to html type 
         tree = html.fromstring(response.content)
         
-        # parse tree, if format is error , return 
-        try:
-            html_all = tree.xpath(my_conf['parameter_xpath'][0])[0]
-        except Exception as e:
-            print e
-            return
-
-        # HTMLParser.unescape , original format convert to unicode -> utf-8  
-	html_parser = HTMLParser.HTMLParser()
-	res = html_parser.unescape(lxml.etree.tostring(html_all)).encode('utf-8')
-
 	if len(my_conf['parameter_xpath']) == 3:
 	    
-            # through regular expression, acquire product field key & value
-	    key = re.findall(unicode(my_conf['parameter_xpath'][1],'utf8'),res,re.I|re.M)
-	    value = re.findall(unicode(my_conf['parameter_xpath'][2],'utf8'),res,re.I|re.M)
-	    for i in xrange(len(key)):
-		temp_dict = {}
-		temp_dict[key[i]] = value[i]
-		parameter_list.append(temp_dict)
+            # parse tree, if format is error , return 
+            try:
+                html_all = tree.xpath(parameter_xpath_list[0])[0]
 
-            if my_conf['name'] == 'jd': 
-                product_introduction_list = []
-                tree = html.fromstring(response.content)
-                html_all = tree.xpath(my_conf['product_introduction_xpath'][0])[0]
-
+                # HTMLParser.unescape , original format convert to unicode -> utf-8  
                 html_parser = HTMLParser.HTMLParser()
                 res = html_parser.unescape(lxml.etree.tostring(html_all)).encode('utf-8')
-                key_value_list = re.findall(unicode(my_conf['product_introduction_xpath'][1],'utf8'),res,re.I|re.M)
+                
+                # through regular expression, acquire product field key & value
+                key = re.findall(unicode(parameter_xpath_list[1],'utf8'),res,re.I|re.M)
+                value = re.findall(unicode(parameter_xpath_list[2],'utf8'),res,re.I|re.M)
 
-                for i in xrange(len(key_value_list)):
-                    key_value_dict = {}
-                    key_value_sp = key_value_list[i].split(u'：')
-                    if 'href' in key_value_sp[1]:
-                        content = re.search(unicode('<a.+?>(.+?)</a>'), key_value_list[i],re.I|re.M)
-                        key_value_sp[1] = content.group(1)
-                    key_value_dict[key_value_sp[0]] = key_value_sp[1]
-                    product_introduction_list.append(key_value_dict)
+                parameter_list = []
+                for i in xrange(len(key)):
+                    temp_dict = {}
+                    temp_dict[key[i]] = value[i]
+                    parameter_list.append(temp_dict)
+                item['parameter_list'] = parameter_list
+            except Exception as e:
+                print e
+
+            if my_conf['name'] == 'jd': 
+
+                try:
+                    html_all = tree.xpath(my_conf['product_introduction_xpath'][0])[0]
+
+                    html_parser = HTMLParser.HTMLParser()
+                    res = html_parser.unescape(lxml.etree.tostring(html_all)).encode('utf-8')
+                    key_value_list = re.findall(unicode(my_conf['product_introduction_xpath'][1],'utf8'),res,re.I|re.M)
+
+                    product_introduction_list = []
+                    for i in xrange(len(key_value_list)):
+                        key_value_dict = {}
+                        key_value_sp = key_value_list[i].split(u'：')
+                        if 'href' in key_value_sp[1]:
+                            content = re.search(unicode('<a.+?>(.+?)</a>'), key_value_list[i],re.I|re.M)
+                            key_value_sp[1] = content.group(1)
+                        key_value_dict[key_value_sp[0]] = key_value_sp[1]
+                        product_introduction_list.append(key_value_dict)
+                    item['product_introduction'] = product_introduction_list 
+                except Exception as e:
+                    print e
 	
-	item['parameter_list'] = parameter_list
-	item['product_introduction'] = product_introduction_list 
 	item['url'] = response.url 
 	item['name'] = sys.argv[1] 
         
+        if "product_introduction" not in item and "parameter_list" not in item:
+            return
+        
         # acquire lock & add info to update_url_list & release lock
         global update_lock, update_url_list
-        if update_lock.acquire():
-            update_url_list.append(
-                UpdateOne(
-                    {"wap_product_url":item['url']}, 
-                    {"$set":{
-                        "parameter_list":item['parameter_list'],
-                        "product_introduction":item['product_introduction']
+        if "product_introduction" in item and "parameter_list" in item:
+            
+            if update_lock.acquire():
+                update_url_list.append(
+                    UpdateOne(
+                        {"wap_product_url":item['url']}, 
+                        {"$set":{
+                            "parameter_list":item['parameter_list'],
+                            "product_introduction":item['product_introduction'],
+                            "is_overseas":num_overseas
+                            }
                         }
-                    }
+                    )
                 )
-            )
-            #update_url_list.append(UpdateOne({"wap_product_url":item['url']}, {"$set":{"parameter_list":item['parameter_list'], "product_introduction":item['product_introduction']}}))
-            update_lock.release()
+                update_lock.release()
+        elif "parameter_list" in item:
+            
+            if update_lock.acquire():
+                update_url_list.append(
+                    UpdateOne(
+                        {"wap_product_url":item['url']}, 
+                        {"$set":{
+                            "parameter_list":item['parameter_list'],
+                            "is_overseas":num_overseas
+                            }
+                        }
+                    )
+                )
+                update_lock.release()
+        elif "product_introduction" in item:
+            
+            if update_lock.acquire():
+                update_url_list.append(
+                    UpdateOne(
+                        {"wap_product_url":item['url']}, 
+                        {"$set":{
+                            "product_introduction":item['product_introduction'],
+                            "is_overseas":num_overseas
+                            }
+                        }
+                    )
+                )
+                update_lock.release()
 
         # write statistics file & flush file
         print >> fw_down_url, item['url']
         fw_down_url.flush()
-    
+
+        if is_overseas == 1:
+            print >> fw_301, item['url']
+        
     # web type is json
     if my_conf['data_type'] == 'json':
         pass
