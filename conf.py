@@ -72,6 +72,7 @@ all_site = [
         'data_type':'html',
         'parameter_xpath': ['//div[@class="Ptable"]','<dt>(.+?)</dt>','<dd>(.+?)</dd>'], 
         'product_introduction_xpath':['//div[@class="p-parameter"]','<li title=".+?">(.+?)</li>'],
+        'global_parameter_xpath': ['//*[@id="specifications"]','<td class="tdTitle">(.+?)</td>','<td>(.+?)</td>'],
         'mall_name':'京东'
     }
 ]
